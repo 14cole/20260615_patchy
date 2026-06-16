@@ -51,9 +51,9 @@ HDRA = [
     ("int", "ibspsave", 1), ("char", "acadfct", 256),
 ]
 
-HDRB_BYTES = 3 * 256  # acadedge/acadcurv/acadbsp; NOT in the path to header-C in .ss
+HDRB_BYTES = 3 * 256  # acadedge/acadcurv/acadbsp = 768; header-B sits between A and C
 
-# the 'C' header == SsStandardC: the standard-parameters block (offset 648 in .ss)
+# the 'C' header == SsStandardC: the standard-parameters block (read at hdrc_off)
 HDRC = [
     ("int","maxlay",1),("int","maxrstep",1),("int","maxchild",1),("int","maxson",1),
     ("int","maxram",1),("int","maxband",1),("int","maxpixx",1),("int","maxpixy",1),
@@ -143,6 +143,25 @@ def print_struct(name, hdr, table=None, base=0):
         print(f"  {tag}  {k:<{width}} = {_fmt_field(v)}")
 
 
+def _field_offset(table, name):
+    """Byte offset of a field within its packed struct table."""
+    off = 0
+    for typ, fname, count in table:
+        if fname == name:
+            return off
+        off += _TYPE_BYTES[typ] * count
+    raise KeyError(name)
+
+
+def scan_hdrc_offset(raw, num_freqs, lo=600, hi=2400):
+    """Candidate header-C offsets: where the int32 at (offset + maxfreq_rel) equals
+    num_freqs. maxfreq must equal the framing-derived freq count, so a match flags a
+    plausible header-C start (and thus the real hdrbsize = offset - len(header-A))."""
+    rel = _field_offset(HDRC, "maxfreq")
+    hi = min(hi, raw.size - rel - 4)
+    return [o for o in range(lo, hi) if _i4(raw, o + rel) == num_freqs]
+
+
 def read_ss(path, verbose=True):
     raw = np.fromfile(path, dtype=np.uint8)
     filesize = raw.size
@@ -150,8 +169,10 @@ def read_ss(path, verbose=True):
         raise ValueError(f"{path}: too small to be a .ss file ({filesize} bytes)")
 
     size_a = _table_bytes(HDRA)        # = 648
-    # header-C immediately follows header-A: 648 + 588 = 1236 (no header-B gap)
-    hdrc_off = size_a                  # = 648
+    # ssread reads A, B, C in order and nbytesb = 1236 + hdrbsize + advsize + itrsize,
+    # so header-B sits between A and C; header-C starts at 648 + hdrbsize.
+    # ("A+C=1236" is their combined size, not adjacency.)
+    hdrc_off = size_a + HDRB_BYTES     # = 648 + 768 = 1416 (verify via the match check)
 
     # --- header C (frequency axis); read once from the first record ----------
     hdrc = _parse_table(raw[hdrc_off:hdrc_off + _table_bytes(HDRC)], HDRC)
@@ -222,8 +243,18 @@ def read_ss(path, verbose=True):
         print(f"  signals           : {nsig}")
         print(f"  num_freqs (framing): {num_freqs_global}    maxfreq (header C): {maxfreq}    match: {match}")
         if not match:
-            print("  !! mismatch -> header-C offset/tables look off; FREQ AXIS SUSPECT")
+            print("  !! header-C mismatch -> wrong offset; FREQ AXIS SUSPECT")
             print("     (az/el/data are framing-pinned and still trustworthy)")
+            rel = _field_offset(HDRC, "maxfreq")
+            for hb in (0, HDRB_BYTES):
+                o = _table_bytes(HDRA) + hb
+                mf = _i4(raw, o + rel) if o + rel + 4 <= raw.size else None
+                flag = "  <- matches num_freqs!" if mf == num_freqs_global else ""
+                print(f"     hdrbsize={hb:>4} -> header-C@{o:<5} maxfreq={mf}{flag}")
+            cands = scan_hdrc_offset(raw, num_freqs_global)
+            print(f"     offsets giving maxfreq=={num_freqs_global}: {cands[:16]}"
+                  + (" ..." if len(cands) > 16 else ""))
+            print(f"     -> real hdrbsize = (that offset) - {_table_bytes(HDRA)}")
         print(f"  ifreq             : {ifreq}   freq1={freq1:.6g}  freq2={freq2:.6g}")
         print(f"  az range          : {min(az):.4f} .. {max(az):.4f}")
         print(f"  el range          : {min(el):.4f} .. {max(el):.4f}")
