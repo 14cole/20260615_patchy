@@ -51,7 +51,7 @@ HDRA = [
     ("int", "ibspsave", 1), ("char", "acadfct", 256),
 ]
 
-HDRB_BYTES = 3 * 256  # acadedge/acadcurv/acadbsp = 768; header-B sits between A and C
+HDRB_BYTES = 256  # measured header-B size: header-C found at 648+256=904 (auto-corrected below)
 
 # the 'C' header == SsStandardC: the standard-parameters block (read at hdrc_off)
 HDRC = [
@@ -169,10 +169,25 @@ def read_ss(path, verbose=True):
         raise ValueError(f"{path}: too small to be a .ss file ({filesize} bytes)")
 
     size_a = _table_bytes(HDRA)        # = 648
-    # ssread reads A, B, C in order and nbytesb = 1236 + hdrbsize + advsize + itrsize,
-    # so header-B sits between A and C; header-C starts at 648 + hdrbsize.
-    # ("A+C=1236" is their combined size, not adjacency.)
-    hdrc_off = size_a + HDRB_BYTES     # = 648 + 768 = 1416 (verify via the match check)
+
+    # frequency count from the first record's framing: nbytesd = n_freqs*32 + 408
+    nbytesd0 = _i4(raw, 4)
+    if nbytesd0 <= 408:
+        raise ValueError(f"{path}: first nbytesd={nbytesd0} (<=408); not a .ss file?")
+    num_freqs0 = (nbytesd0 - 408) // 32
+
+    # header-C starts at 648 + hdrbsize (ssread order A,B,C; nbytesb = 1236 + hdrbsize
+    # + advsize + itrsize). hdrbsize defaults to HDRB_BYTES but the CAD-path block can
+    # vary by file, so confirm via maxfreq==num_freqs and auto-locate if it's off.
+    rel_maxfreq = _field_offset(HDRC, "maxfreq")
+    hdrc_off = size_a + HDRB_BYTES
+    if hdrc_off + rel_maxfreq + 4 > raw.size or _i4(raw, hdrc_off + rel_maxfreq) != num_freqs0:
+        cands = scan_hdrc_offset(raw, num_freqs0)
+        if cands:
+            hdrc_off = min(cands, key=lambda o: abs(o - (size_a + HDRB_BYTES)))
+            if verbose:
+                print(f"  note: header-C auto-located at {hdrc_off} "
+                      f"(hdrbsize={hdrc_off - size_a}; HDRB_BYTES default {HDRB_BYTES})")
 
     # --- header C (frequency axis); read once from the first record ----------
     hdrc = _parse_table(raw[hdrc_off:hdrc_off + _table_bytes(HDRC)], HDRC)
