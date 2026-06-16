@@ -122,12 +122,25 @@ def _fmt_field(v):
     return vals[0] if len(vals) == 1 else "[" + ", ".join(vals) + "]"
 
 
-def print_struct(name, hdr):
-    """Pretty-print a parsed header dict (field = value) in table order."""
-    print(f"{name}:")
+def print_struct(name, hdr, table=None, base=0):
+    """Pretty-print a parsed header dict as `@off field = value`, in table order.
+
+    `@off` is the byte offset of the field within the struct; if `base` is given
+    it's added so the number is the absolute file offset. Use it to line fields
+    up against the reference reader and spot where the layout drifts.
+    """
+    offsets = {}
+    if table is not None:
+        off = 0
+        for typ, fname, count in table:
+            if fname:
+                offsets[fname] = off
+            off += _TYPE_BYTES[typ] * count
+    print(f"{name}:" + (f"   (struct starts at file offset {base})" if base else ""))
     width = max((len(k) for k in hdr), default=0)
     for k, v in hdr.items():
-        print(f"  {k:<{width}} = {_fmt_field(v)}")
+        tag = f"@{base + offsets[k]:>5}" if k in offsets else "      "
+        print(f"  {tag}  {k:<{width}} = {_fmt_field(v)}")
 
 
 def read_ss(path, verbose=True):
@@ -217,7 +230,7 @@ def read_ss(path, verbose=True):
         print(f"  freq[:3]          : {np.round(freqdata[:3], 6)}")
         print(f"  vv[sig0][:2]      : {result['vv'][0][:2]}")
         print()
-        print_struct("SsStandardC", hdrc)
+        print_struct("SsStandardC", hdrc, HDRC, base=hdrc_off)
     return result
 
 
