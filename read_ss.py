@@ -53,6 +53,7 @@ HDRA = [
 
 HDRB_BYTES = 3 * 256  # acadedge/acadcurv/acadbsp; NOT in the path to header-C in .ss
 
+# the 'C' header == SsStandardC: the standard-parameters block (offset 648 in .ss)
 HDRC = [
     ("int","maxlay",1),("int","maxrstep",1),("int","maxchild",1),("int","maxson",1),
     ("int","maxram",1),("int","maxband",1),("int","maxpixx",1),("int","maxpixy",1),
@@ -101,13 +102,32 @@ def _parse_table(buf, table):
         elif typ == "float":
             out[name] = np.frombuffer(chunk, BE_F4, count)
         elif typ == "char":
-            out[name] = chunk.tobytes()
+            out[name] = bytes(chunk)
         off += nbytes
     return out
 
 
 def _i4(buf, off):
     return int(np.frombuffer(buf[off:off + 4], BE_I4)[0])
+
+
+def _fmt_field(v):
+    """Format one parsed header field: bytes -> string, numbers -> scalar or list."""
+    if isinstance(v, (bytes, bytearray)):
+        return repr(v.decode("ascii", errors="replace").rstrip("\x00").rstrip())
+    if v.dtype.kind == "f":
+        vals = [f"{float(x):.6g}" for x in v.reshape(-1)]
+    else:
+        vals = [str(int(x)) for x in v.reshape(-1)]
+    return vals[0] if len(vals) == 1 else "[" + ", ".join(vals) + "]"
+
+
+def print_struct(name, hdr):
+    """Pretty-print a parsed header dict (field = value) in table order."""
+    print(f"{name}:")
+    width = max((len(k) for k in hdr), default=0)
+    for k, v in hdr.items():
+        print(f"  {k:<{width}} = {_fmt_field(v)}")
 
 
 def read_ss(path, verbose=True):
@@ -196,6 +216,8 @@ def read_ss(path, verbose=True):
         print(f"  el range          : {min(el):.4f} .. {max(el):.4f}")
         print(f"  freq[:3]          : {np.round(freqdata[:3], 6)}")
         print(f"  vv[sig0][:2]      : {result['vv'][0][:2]}")
+        print()
+        print_struct("SsStandardC", hdrc)
     return result
 
 
