@@ -44,14 +44,14 @@ HDRA = [
     ("char", "x_version_num", 16), ("char", "hardware", 8),
     ("char", "host_machine", 16), ("char", "op_system", 16),
     ("char", "op_release", 8), ("char", "op_version", 8),
-    ("char", "mem_version", 8), ("char", "num_tasks", 1),
-    ("char", "simTitle", 256), ("char", "simDate", 3),
-    ("char", "restart_Date", 3), ("char", "restart_count", 1),
-    ("char", "ipoedge", 1), ("char", "iqmatrix", 1),
-    ("char", "ibspsave", 1), ("char", "acadfct", 256),
+    ("char", "mem_version", 8), ("int", "num_tasks", 1),
+    ("char", "simTitle", 256), ("int", "simDate", 3),
+    ("int", "restart_Date", 3), ("int", "restart_count", 1),
+    ("int", "ipoedge", 1), ("int", "iqmatrix", 1),
+    ("int", "ibspsave", 1), ("char", "acadfct", 256),
 ]
 
-HDRB_BYTES = 3 * 256  # acadedge, acadcurv, acadbsp -- 3 x char[256]
+HDRB_BYTES = 3 * 256  # acadedge/acadcurv/acadbsp; NOT in the path to header-C in .ss
 
 HDRC = [
     ("int","maxlay",1),("int","maxrstep",1),("int","maxchild",1),("int","maxson",1),
@@ -116,8 +116,9 @@ def read_ss(path, verbose=True):
     if filesize < 8:
         raise ValueError(f"{path}: too small to be a .ss file ({filesize} bytes)")
 
-    size_a = _table_bytes(HDRA)        # = 615
-    hdrc_off = size_a + HDRB_BYTES     # header-C offset within record 0
+    size_a = _table_bytes(HDRA)        # = 648
+    # header-C immediately follows header-A: 648 + 588 = 1236 (no header-B gap)
+    hdrc_off = size_a                  # = 648
 
     # --- header C (frequency axis); read once from the first record ----------
     hdrc = _parse_table(raw[hdrc_off:hdrc_off + _table_bytes(HDRC)], HDRC)
